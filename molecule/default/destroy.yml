@@ -1,0 +1,8 @@
+- name: Destroy test container
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Remove container
+      containers.podman.podman_container:
+        name: archipelago-molecule
+        state: absent

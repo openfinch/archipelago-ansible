@@ -1,0 +1,23 @@
+[Unit]
+Description=Archipelago MultiServer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=archipelago
+Group=archipelago
+WorkingDirectory={{ archipelago_root }}/current
+ExecStart={{ archipelago_root }}/current/ArchipelagoServer --port {{ archipelago_port }}
+{%- if archipelago_password %} --password "{{ archipelago_password }}"{% endif %}
+{%- if archipelago_server_password %} --server_password "{{ archipelago_server_password }}"{% endif %}
+{%- for arg in archipelago_server_args %} "{{ arg }}"{% endfor %} {{ archipelago_seed_path }}
+StandardInput=null
+Restart=on-failure
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths={{ archipelago_root }}
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+- name: Verify
+  hosts: archipelago
+  gather_facts: false
+  tasks:
+    - name: Service is running
+      ansible.builtin.command: systemctl is-active archipelago
+      changed_when: false
+
+    # A plain GET to a websockets server answers 426 Upgrade Required.
+    - name: WebSocket server is listening
+      ansible.builtin.uri:
+        url: http://127.0.0.1:38281/
+        status_code: 426
+      register: handshake
+      until: handshake is succeeded
+      retries: 15
+      delay: 2
+
+    - name: Unit passes the password
+      ansible.builtin.command: grep -q -- '--password "molecule"' /etc/systemd/system/archipelago.service
+      changed_when: false

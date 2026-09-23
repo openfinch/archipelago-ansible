@@ -1,0 +1,51 @@
+# Drop a player locally and roll a new seed. The removed player's file must
+# disappear from the server and the service must switch to the new seed.
+- name: Stage player files without Bob
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Copy fixtures
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/files/"
+        dest: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/files/"
+        mode: preserve
+
+    - name: Remove Bob
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/files/players/bob.yaml"
+        state: absent
+
+- name: Record hosted seed
+  hosts: archipelago
+  gather_facts: false
+  tasks:
+    - name: Read unit
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/archipelago.service
+      register: unit_before
+
+- name: Regenerate
+  ansible.builtin.import_playbook: ../../site.yml
+  vars:
+    archipelago_regenerate: true
+    archipelago_files_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/files"
+
+- name: Check regeneration
+  hosts: archipelago
+  gather_facts: false
+  tasks:
+    - name: Read unit
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/archipelago.service
+      register: unit_after
+
+    - name: Check Bob's file
+      ansible.builtin.stat:
+        path: /opt/archipelago/players/bob.yaml
+      register: bob
+
+    - name: Assert new seed is hosted and Bob was removed
+      ansible.builtin.assert:
+        that:
+          - unit_after.content != unit_before.content
+          - not bob.stat.exists

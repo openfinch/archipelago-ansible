@@ -1,0 +1,48 @@
+# Take an older seed off the server, delete it there, then host it again via
+# archipelago_seed_file. The service must switch to exactly that seed.
+- name: Take an old seed off the server
+  hosts: archipelago
+  gather_facts: false
+  tasks:
+    - name: Find seeds
+      ansible.builtin.find:
+        paths: /opt/archipelago/seeds
+        patterns: "AP_*.zip"
+      register: seeds
+
+    - name: Pick the oldest seed
+      ansible.builtin.set_fact:
+        old_seed: "{{ (seeds.files | sort(attribute='mtime') | first).path }}"
+
+    - name: Download it
+      ansible.builtin.fetch:
+        src: "{{ old_seed }}"
+        dest: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/"
+        flat: true
+
+    - name: Delete it on the server
+      ansible.builtin.file:
+        path: "{{ old_seed }}"
+        state: absent
+
+- name: Host the uploaded seed
+  ansible.builtin.import_playbook: ../../site.yml
+  vars:
+    archipelago_seed_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/{{ hostvars['archipelago-molecule'].old_seed | basename }}"
+
+- name: Check uploaded seed
+  hosts: archipelago
+  gather_facts: false
+  tasks:
+    - name: Stat uploaded seed
+      ansible.builtin.stat:
+        path: "{{ old_seed }}"
+      register: uploaded
+
+    - name: Unit hosts the uploaded seed
+      ansible.builtin.command: grep -q -- "{{ old_seed }}" /etc/systemd/system/archipelago.service
+      changed_when: false
+
+    - name: Assert seed was uploaded
+      ansible.builtin.assert:
+        that: uploaded.stat.exists

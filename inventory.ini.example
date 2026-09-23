@@ -1,0 +1,2 @@
+[archipelago]
+ap.example.com ansible_user=root

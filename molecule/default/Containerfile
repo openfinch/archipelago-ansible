@@ -1,0 +1,6 @@
+# Matches the production target (flix-frontend, Debian 13) with systemd as PID 1.
+FROM docker.io/library/debian:trixie
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends systemd systemd-sysv python3 sudo ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+CMD ["/sbin/init"]

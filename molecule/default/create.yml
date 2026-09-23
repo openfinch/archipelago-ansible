@@ -1,0 +1,47 @@
+- name: Create test container
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Build image
+      containers.podman.podman_image:
+        name: archipelago-molecule
+        path: "{{ playbook_dir }}"
+        build:
+          file: Containerfile
+
+    - name: Start container
+      containers.podman.podman_container:
+        name: archipelago-molecule
+        image: archipelago-molecule
+        state: started
+
+    - name: Wait for systemd
+      ansible.builtin.command: podman exec archipelago-molecule systemctl is-system-running --wait
+      register: systemd_state
+      changed_when: false
+      failed_when: systemd_state.stdout not in ["running", "degraded"]
+
+    # Pre-seed the release so each test run doesn't download 125 MB. The
+    # playbook's get_url then only verifies the checksum.
+    - name: Load release version
+      ansible.builtin.include_vars: ../../group_vars/all.yml
+
+    - name: Create local cache directory
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'HOME') }}/.cache/archipelago-molecule"
+        state: directory
+        mode: "0755"
+
+    - name: Download release to local cache
+      ansible.builtin.get_url:
+        url: "https://github.com/ArchipelagoMW/Archipelago/releases/download/{{ archipelago_version }}/Archipelago_{{ archipelago_version }}_linux-x86_64.tar.gz"
+        dest: "{{ lookup('env', 'HOME') }}/.cache/archipelago-molecule/Archipelago_{{ archipelago_version }}.tar.gz"
+        checksum: "sha256:{{ archipelago_sha256 }}"
+        mode: "0644"
+
+    - name: Copy release into container
+      ansible.builtin.shell: >-
+        podman exec archipelago-molecule mkdir -p {{ archipelago_root }} &&
+        podman cp {{ lookup('env', 'HOME') }}/.cache/archipelago-molecule/Archipelago_{{ archipelago_version }}.tar.gz
+        archipelago-molecule:{{ archipelago_root }}/
+      changed_when: true

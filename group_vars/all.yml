@@ -1,0 +1,26 @@
+# Release to install. When changing the version, update the checksum from the
+# release page: https://github.com/ArchipelagoMW/Archipelago/releases
+archipelago_version: "0.6.7"
+archipelago_sha256: "b0d0ce90b5a9a0f1213991d37e1eb58f093e3c4eba2dfcd565bfbb79ac2a49fc"
+
+archipelago_root: /opt/archipelago
+archipelago_port: 38281
+
+# Password players need to connect. Empty means no password.
+archipelago_password: ""
+# Password for the !admin command. Empty disables it.
+archipelago_server_password: ""
+
+# Extra ArchipelagoServer flags, for example:
+#   ["--hint_cost", "5", "--release_mode", "enabled"]
+archipelago_server_args: []
+
+# Local path to a seed generated elsewhere (for example on archipelago.gg).
+# When set, it is uploaded and hosted instead of generating on the server.
+archipelago_seed_file: ""
+
+# Set to true (-e archipelago_regenerate=true) to roll a new seed from players/.
+archipelago_regenerate: false
+
+# Local directory holding players/ and custom_worlds/.
+archipelago_files_dir: "{{ playbook_dir }}"

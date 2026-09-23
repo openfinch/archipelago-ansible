@@ -1,0 +1,166 @@
+- name: Deploy Archipelago server
+  hosts: archipelago
+  become: true
+  vars:
+    install_dir: "{{ archipelago_root }}/{{ archipelago_version }}"
+    seeds_dir: "{{ archipelago_root }}/seeds"
+
+  tasks:
+    - name: Check values that are written into the systemd unit
+      ansible.builtin.assert:
+        that:
+          - archipelago_password is match('^[A-Za-z0-9_.-]*$')
+          - archipelago_server_password is match('^[A-Za-z0-9_.-]*$')
+        fail_msg: Passwords may only contain letters, digits, '-', '_' and '.'.
+        quiet: true
+
+    - name: Create service user
+      ansible.builtin.user:
+        name: archipelago
+        system: true
+        home: "{{ archipelago_root }}"
+        create_home: false
+        shell: /usr/sbin/nologin
+
+    - name: Create directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: archipelago
+        group: archipelago
+        mode: "0755"
+      loop:
+        - "{{ archipelago_root }}"
+        - "{{ install_dir }}"
+        - "{{ seeds_dir }}"
+        - "{{ archipelago_root }}/players"
+        - "{{ archipelago_root }}/custom_worlds"
+
+    - name: Download release
+      ansible.builtin.get_url:
+        url: "https://github.com/ArchipelagoMW/Archipelago/releases/download/{{ archipelago_version }}/Archipelago_{{ archipelago_version }}_linux-x86_64.tar.gz"
+        dest: "{{ archipelago_root }}/Archipelago_{{ archipelago_version }}.tar.gz"
+        checksum: "sha256:{{ archipelago_sha256 }}"
+        mode: "0644"
+
+    - name: Extract release
+      ansible.builtin.unarchive:
+        src: "{{ archipelago_root }}/Archipelago_{{ archipelago_version }}.tar.gz"
+        dest: "{{ install_dir }}"
+        remote_src: true
+        extra_opts: [--strip-components=1]
+        creates: "{{ install_dir }}/ArchipelagoServer"
+        owner: archipelago
+        group: archipelago
+
+    # custom_worlds lives outside the versioned install so upgrades keep it.
+    - name: Link custom_worlds into the install
+      ansible.builtin.file:
+        src: "{{ archipelago_root }}/custom_worlds"
+        dest: "{{ install_dir }}/custom_worlds"
+        state: link
+        owner: archipelago
+        group: archipelago
+
+    - name: Point current at this version
+      ansible.builtin.file:
+        src: "{{ install_dir }}"
+        dest: "{{ archipelago_root }}/current"
+        state: link
+        owner: archipelago
+        group: archipelago
+      notify: Restart archipelago
+
+    - name: Upload player options and custom worlds
+      ansible.builtin.copy:
+        src: "{{ archipelago_files_dir }}/{{ item }}/"
+        dest: "{{ archipelago_root }}/{{ item }}/"
+        owner: archipelago
+        group: archipelago
+        mode: "0644"
+      loop: [players, custom_worlds]
+
+    - name: Find uploaded files on the server
+      ansible.builtin.find:
+        paths: "{{ archipelago_root }}/{{ item }}"
+        hidden: true
+      loop: [players, custom_worlds]
+      register: remote_files
+
+    - name: Remove files that were deleted locally
+      ansible.builtin.file:
+        path: "{{ item.1.path }}"
+        state: absent
+      loop: "{{ remote_files.results | subelements('files') }}"
+      loop_control:
+        label: "{{ item.1.path }}"
+      when: (archipelago_files_dir ~ '/' ~ item.0.item ~ '/' ~ (item.1.path | basename)) is not exists
+
+    - name: Upload pre-generated seed
+      ansible.builtin.copy:
+        src: "{{ archipelago_seed_file }}"
+        dest: "{{ seeds_dir }}/"
+        owner: archipelago
+        group: archipelago
+        mode: "0644"
+      when: archipelago_seed_file | length > 0
+
+    - name: Find existing seeds
+      ansible.builtin.find:
+        paths: "{{ seeds_dir }}"
+        patterns: "AP_*.zip"
+      register: existing_seeds
+
+    - name: Generate seed from players/
+      ansible.builtin.command:
+        argv:
+          - "{{ archipelago_root }}/current/ArchipelagoGenerate"
+          - --player_files_path
+          - "{{ archipelago_root }}/players"
+          - --outputpath
+          - "{{ seeds_dir }}"
+        chdir: "{{ archipelago_root }}/current"
+        stdin: ""
+      become_user: archipelago
+      changed_when: true
+      when:
+        - archipelago_seed_file | length == 0
+        - archipelago_regenerate | bool or existing_seeds.matched == 0
+
+    - name: Find seeds after generation
+      ansible.builtin.find:
+        paths: "{{ seeds_dir }}"
+        patterns: "AP_*.zip"
+      register: seeds
+
+    - name: Select seed to host
+      ansible.builtin.set_fact:
+        archipelago_seed_path: >-
+          {{ (seeds_dir ~ '/' ~ (archipelago_seed_file | basename))
+             if archipelago_seed_file | length > 0
+             else (seeds.files | sort(attribute='mtime') | last).path }}
+
+    - name: Install systemd unit
+      ansible.builtin.template:
+        src: archipelago.service.j2
+        dest: /etc/systemd/system/archipelago.service
+        mode: "0600"
+      notify: Restart archipelago
+
+    - name: Enable and start service
+      ansible.builtin.systemd_service:
+        name: archipelago
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Show connection details
+      ansible.builtin.debug:
+        msg: "Hosting {{ archipelago_seed_path | basename }} at {{ inventory_hostname }}:{{ archipelago_port }}"
+
+  handlers:
+    - name: Restart archipelago
+      ansible.builtin.systemd_service:
+        name: archipelago
+        state: restarted
+        daemon_reload: true

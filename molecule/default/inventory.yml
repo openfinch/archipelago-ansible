@@ -1,0 +1,6 @@
+archipelago:
+  hosts:
+    archipelago-molecule:
+      ansible_connection: containers.podman.podman
+      archipelago_password: molecule
+      archipelago_files_dir: "{{ inventory_dir }}/files"
