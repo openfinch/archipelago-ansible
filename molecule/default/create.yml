@@ -21,6 +21,23 @@
       changed_when: false
       failed_when: systemd_state.stdout not in ["running", "degraded"]
 
+    # Stands in for Discord. Every webhook post is appended to /tmp/hooks.jsonl.
+    - name: Start fake Discord webhook
+      ansible.builtin.command:
+        argv: [podman, exec, -d, archipelago-molecule, python3, -c, "{{ listener }}"]
+      vars:
+        listener: |
+          import http.server
+          class Handler(http.server.BaseHTTPRequestHandler):
+              def do_POST(self):
+                  body = self.rfile.read(int(self.headers["Content-Length"]))
+                  with open("/tmp/hooks.jsonl", "ab") as f:
+                      f.write(body + b"\n")
+                  self.send_response(204)
+                  self.end_headers()
+          http.server.HTTPServer(("127.0.0.1", 8099), Handler).serve_forever()
+      changed_when: true
+
     # Pre-seed the release so each test run doesn't download 125 MB. The
     # playbook's get_url then only verifies the checksum.
     - name: Load release version

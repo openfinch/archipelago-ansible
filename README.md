@@ -20,6 +20,15 @@ Tested on Ubuntu 24.04 (x86_64). Needs `ansible-core` only, no collections.
 ## Usage
 
 ```sh
+./start.sh     # start or resume the game (generates a seed if none exists)
+./restart.sh   # roll a new seed and restart; asks for confirmation
+./stop.sh      # stop the server; progress is saved
+```
+
+The scripts wrap the playbook. Extra arguments are passed through to Ansible,
+for example `./start.sh --check`. Equivalent playbook commands:
+
+```sh
 # First run: installs Archipelago, generates a seed, starts the server.
 ansible-playbook site.yml
 
@@ -34,6 +43,28 @@ Players connect to `<host>:38281` with the password.
 
 Download each player's patch file (if their game has one) from the `AP_*.zip`
 in `/opt/archipelago/seeds/` on the server.
+
+## Discord notifications
+
+Optional. Posts to a Discord channel webhook whenever someone sends an item
+to another player, pinging the receiver, and when a player completes their
+goal. No bot and no extra slot are needed, so it can be turned on at any time.
+
+Create a webhook (channel settings -> Integrations -> Webhooks), then put
+it and each player's Discord user ID in `host_vars/<host>.yml` (gitignored):
+
+```yaml
+archipelago_discord_webhook_url: https://discord.com/api/webhooks/...
+archipelago_discord_mentions:
+  player1: "123456789012345678"
+  player2: "234567890123456789"
+```
+
+User IDs: Discord settings -> Advanced -> Developer Mode, then right-click a
+user -> Copy User ID. Players not listed are named in bold without a ping.
+
+It runs as `archipelago-discord.service`, reading the server's journal.
+Messages are batched every 3 seconds to stay under Discord's rate limit.
 
 ## Layout on the server
 
@@ -65,6 +96,8 @@ The `default` scenario checks, in order:
    starts the service.
 2. Second run reports no changes (idempotence).
 3. The service is active, port 38281 answers, and the unit has the password.
+   The Discord notifier is running and turns sample server log lines into
+   one batched webhook message that pings only mapped players.
 4. Removing a player and running with `archipelago_regenerate=true` deletes
    that player's file on the server and hosts a new seed.
 5. A seed passed with `archipelago_seed_file` is uploaded and hosted.

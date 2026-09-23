@@ -1,2 +1,4 @@
 inventory.ini
 *.retry
+host_vars/
+demo/

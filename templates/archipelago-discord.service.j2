@@ -1,0 +1,19 @@
+[Unit]
+Description=Archipelago Discord notifications
+After=archipelago.service
+
+[Service]
+User=archipelago
+Group=archipelago
+SupplementaryGroups=systemd-journal
+LoadCredential=config:/etc/archipelago-discord.json
+ExecStart=/bin/sh -c 'journalctl --follow --unit archipelago --output cat --lines 0 | /usr/bin/python3 {{ archipelago_root }}/discord-forwarder.py'
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+{% set text = spoiler.stdout | replace('\r', '') %}
+{% set players = text | regex_findall('Player \\d+: (.+)\\nGame:\\s+(.+)') %}
+**Welcome to Archipelago**
+
+{% for name, game in players %}
+**{{ name }}** - {{ game }}
+{% else %}
+{# Single-player spoilers have no "Player N:" lines, only "Game:". #}
+{% for game in text | regex_findall('(?m)^Game:\\s+(.+)$') %}
+{{ game }}
+{% endfor %}
+{% endfor %}
+
+Address: {{ archipelago_public_address }}:{{ archipelago_port }}
+Password: {{ archipelago_password if archipelago_password else '(none)' }}

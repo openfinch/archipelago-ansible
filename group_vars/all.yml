@@ -24,3 +24,14 @@ archipelago_regenerate: false
 
 # Local directory holding players/ and custom_worlds/.
 archipelago_files_dir: "{{ playbook_dir }}"
+
+# Discord webhook for item notifications. Empty disables the notifier.
+# Set it (and the mentions below) in the gitignored host_vars/<host>.yml.
+archipelago_discord_webhook_url: ""
+# Slot name -> Discord user ID. Listed players are pinged when they receive
+# an item; others are named in bold.
+archipelago_discord_mentions: {}
+# Address shown in the Discord welcome message.
+archipelago_public_address: "{{ ansible_default_ipv4.address }}"
+# Set to true (-e archipelago_discord_welcome=true) to repost the welcome.
+archipelago_discord_welcome: false

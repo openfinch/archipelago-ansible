@@ -19,3 +19,51 @@
     - name: Unit passes the password
       ansible.builtin.command: grep -q -- '--password "molecule"' /etc/systemd/system/archipelago.service
       changed_when: false
+
+    - name: Notifier is running
+      ansible.builtin.command: systemctl is-active archipelago-discord
+      changed_when: false
+
+    - name: Forward sample server log lines
+      ansible.builtin.shell: |
+        set -e
+        mkdir -p /tmp/cred && cp /etc/archipelago-discord.json /tmp/cred/config
+        before=$(wc -l < /tmp/hooks.jsonl)
+        printf '%s\n' \
+          '(Team #1) Alice sent Sword to Bob (Chest)' \
+          '(Team #1) Bob sent Shield to Carol (Cave)' \
+          '(Team #1) Bob sent Key to Bob (Door)' \
+          'server listening on 0.0.0.0:38281' \
+          'Carol (Team #1) has completed their goal.' \
+          | CREDENTIALS_DIRECTORY=/tmp/cred timeout 30 python3 /opt/archipelago/discord-forwarder.py
+        tail -n +$((before + 1)) /tmp/hooks.jsonl
+      register: hook
+      changed_when: false
+
+    - name: Webhook got one batched message with a ping for Bob only
+      ansible.builtin.assert:
+        that:
+          - hook.stdout_lines | length == 1
+          - (hook.stdout | from_json).content == expected
+          - "(hook.stdout | from_json).allowed_mentions == {'parse': ['users']}"
+      vars:
+        expected: |-
+          <@123456> got **Sword** from Alice (Chest)
+          **Carol** got **Shield** from Bob (Cave)
+          **Carol** has completed their goal!
+
+    - name: Read the latest welcome message
+      ansible.builtin.shell: grep -F 'Welcome to Archipelago' /tmp/hooks.jsonl | tail -n 1
+      register: welcome
+      changed_when: false
+
+    - name: Welcome lists the players, address and password without pinging
+      ansible.builtin.assert:
+        that:
+          - welcome_content.startswith('**Welcome to Archipelago**')
+          - "'APQuest' in welcome_content"
+          - "':38281' in welcome_content"
+          - "'Password: molecule' in welcome_content"
+          - "(welcome.stdout | from_json).allowed_mentions == {'parse': []}"
+      vars:
+        welcome_content: "{{ (welcome.stdout | from_json).content }}"

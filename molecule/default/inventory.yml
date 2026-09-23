@@ -4,3 +4,7 @@ archipelago:
       ansible_connection: containers.podman.podman
       archipelago_password: molecule
       archipelago_files_dir: "{{ inventory_dir }}/files"
+      archipelago_public_address: 127.0.0.1
+      archipelago_discord_webhook_url: http://127.0.0.1:8099/hook
+      archipelago_discord_mentions:
+        Bob: "123456"

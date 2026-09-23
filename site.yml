@@ -154,6 +154,74 @@
         state: started
         daemon_reload: true
 
+    - name: Install Discord notifier
+      when: archipelago_discord_webhook_url | length > 0
+      block:
+        - name: Install forwarder script
+          ansible.builtin.copy:
+            src: discord-forwarder.py
+            dest: "{{ archipelago_root }}/discord-forwarder.py"
+            mode: "0644"
+          notify: Restart archipelago-discord
+
+        - name: Write notifier config
+          ansible.builtin.copy:
+            content: "{{ {'webhook_url': archipelago_discord_webhook_url, 'mentions': archipelago_discord_mentions | dict2items | selectattr('value') | items2dict} | to_nice_json }}\n"
+            dest: /etc/archipelago-discord.json
+            mode: "0600"
+          notify: Restart archipelago-discord
+
+        - name: Install notifier systemd unit
+          ansible.builtin.template:
+            src: archipelago-discord.service.j2
+            dest: /etc/systemd/system/archipelago-discord.service
+            mode: "0644"
+          notify: Restart archipelago-discord
+
+        - name: Enable and start notifier
+          ansible.builtin.systemd_service:
+            name: archipelago-discord
+            enabled: true
+            state: started
+            daemon_reload: true
+
+    - name: Read player list from the hosted seed
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import sys, zipfile
+            z = zipfile.ZipFile(sys.argv[1])
+            names = [n for n in z.namelist() if n.endswith("_Spoiler.txt")]
+            print(z.read(names[0]).decode("utf-8-sig") if names else "")
+          - "{{ archipelago_seed_path }}"
+      register: spoiler
+      changed_when: false
+
+    # Holds the players, address and password. The Discord welcome is posted
+    # only when this text changes (or on request).
+    - name: Write welcome message
+      ansible.builtin.copy:
+        content: "{{ lookup('ansible.builtin.template', 'discord-welcome.j2') }}"
+        dest: "{{ archipelago_root }}/welcome.txt"
+        mode: "0600"
+      register: welcome
+
+    - name: Post Discord welcome message
+      ansible.builtin.uri:
+        url: "{{ archipelago_discord_webhook_url }}"
+        method: POST
+        body_format: json
+        body:
+          content: "{{ lookup('ansible.builtin.template', 'discord-welcome.j2') }}"
+          allowed_mentions:
+            parse: []
+        status_code: [200, 204]
+      when:
+        - archipelago_discord_webhook_url | length > 0
+        - welcome is changed or archipelago_discord_welcome | bool
+
     - name: Show connection details
       ansible.builtin.debug:
         msg: "Hosting {{ archipelago_seed_path | basename }} at {{ inventory_hostname }}:{{ archipelago_port }}"
@@ -162,5 +230,11 @@
     - name: Restart archipelago
       ansible.builtin.systemd_service:
         name: archipelago
+        state: restarted
+        daemon_reload: true
+
+    - name: Restart archipelago-discord
+      ansible.builtin.systemd_service:
+        name: archipelago-discord
         state: restarted
         daemon_reload: true
