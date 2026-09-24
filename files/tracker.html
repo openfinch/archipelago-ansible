@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Archipelago Tracker</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2329; --muted: #66707a; --line: #e2e5e9;
+          --accent: #316b84; --good: #2e8b57; --prog: #7b4bb3; --useful: #2f6fb3; --trap: #b3452f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14181c; --card: #1c2228; --text: #e4e8ec; --muted: #98a2ac; --line: #2c343c;
+            --accent: #5aa3c2; --good: #4fbf82; --prog: #b08be0; --useful: #6fa8e6; --trap: #e07a62; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  .status { color: var(--muted); font-size: 13px; }
+  .layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 800px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  .players { display: grid; gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .top { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .name { font-weight: 600; }
+  .game { color: var(--muted); font-size: 13px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--line); margin-right: 6px; }
+  .dot.on { background: var(--good); }
+  .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--good); color: var(--good); }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 8px 0 4px; }
+  .fill { height: 100%; background: var(--accent); }
+  .count { font-size: 13px; color: var(--muted); }
+  details { margin-top: 6px; font-size: 14px; }
+  summary { cursor: pointer; color: var(--accent); }
+  ul { margin: 6px 0 0; padding-left: 18px; }
+  li { margin: 2px 0; overflow-wrap: anywhere; }
+  .p1 { color: var(--prog); font-weight: 600; }
+  .p2 { color: var(--useful); }
+  .p4 { color: var(--trap); }
+  .found { color: var(--muted); text-decoration: line-through; }
+  .feed li { list-style: none; margin-left: -18px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+  .when { color: var(--muted); font-size: 12px; margin-right: 6px; }
+  .empty { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Archipelago Tracker</h1>
+    <span class="status" id="status">Loading...</span>
+  </header>
+  <div class="layout">
+    <section class="players" id="players"></section>
+    <section class="card">
+      <h2>Recent sends</h2>
+      <ul class="feed" id="feed"></ul>
+    </section>
+  </div>
+</main>
+<script>
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+// Item flags: 1 progression, 2 useful, 4 trap.
+const flagClass = f => (f & 1) ? "p1" : (f & 4) ? "p4" : (f & 2) ? "p2" : "";
+// Remember which sections are expanded, since each refresh redraws the page.
+const openSections = new Set();
+const section = (key, label) => {
+  const d = el("details");
+  d.open = openSections.has(key);
+  d.addEventListener("toggle", () => d.open ? openSections.add(key) : openSections.delete(key));
+  d.append(el("summary", "", label));
+  return d;
+};
+const ago = t => {
+  const s = Math.max(0, Math.round(Date.now() / 1000 - t));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`;
+};
+
+function playerCard(p) {
+  const card = el("article", "card");
+  const top = el("div", "top");
+  const who = el("div");
+  const name = el("span", "name");
+  name.append(el("span", p.online ? "dot on" : "dot"), p.name);
+  who.append(name, el("div", "game", p.game));
+  top.append(who);
+  if (p.goal) top.append(el("span", "badge", "Goal complete"));
+  card.append(top);
+
+  const pct = p.total ? Math.round(100 * p.checked / p.total) : 0;
+  const bar = el("div", "bar");
+  const fill = el("div", "fill");
+  fill.style.width = pct + "%";
+  bar.append(fill);
+  card.append(bar, el("div", "count", `${p.checked} / ${p.total} checks (${pct}%)`));
+
+  const received = section(p.name + "/received", `Items received (${p.received.length})`);
+  const rl = el("ul");
+  for (const r of p.received.slice().reverse()) {
+    const li = el("li");
+    li.append(el("span", flagClass(r.flags), r.item), ` from ${r.from} (${r.location})`);
+    rl.append(li);
+  }
+  received.append(rl);
+
+  const hints = section(p.name + "/hints", `Hints (${p.hints.length})`);
+  const hl = el("ul");
+  for (const h of p.hints) {
+    hl.append(el("li", h.found ? "found" : "", `${h.item}: ${h.location} in ${h.in_world_of}'s world`));
+  }
+  hints.append(hl);
+  card.append(received, hints);
+  return card;
+}
+
+async function refresh() {
+  try {
+    const s = await (await fetch("api/state", { cache: "no-store" })).json();
+    document.getElementById("status").textContent =
+      (s.server_up ? "Server online" : "Server offline") + " - updated " + new Date().toLocaleTimeString();
+    const players = document.getElementById("players");
+    players.replaceChildren(...s.players.map(playerCard));
+    if (!s.players.length) players.append(el("p", "empty", "No players connected to the tracker yet."));
+    const feed = document.getElementById("feed");
+    feed.replaceChildren(...s.feed.map(f => {
+      const li = el("li");
+      li.append(el("span", "when", ago(f.time)), `${f.from} sent `, el("span", flagClass(f.flags), f.item),
+                ` to ${f.to} (${f.location})`);
+      return li;
+    }));
+    if (!s.feed.length) feed.append(el("li", "empty", "No sends since the tracker started."));
+  } catch (e) {
+    document.getElementById("status").textContent = "Tracker unreachable - retrying";
+  }
+}
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

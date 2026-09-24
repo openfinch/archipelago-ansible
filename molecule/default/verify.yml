@@ -67,3 +67,123 @@
           - "(welcome.stdout | from_json).allowed_mentions == {'parse': []}"
       vars:
         welcome_content: "{{ (welcome.stdout | from_json).content }}"
+
+    - name: Tracker is running
+      ansible.builtin.command: systemctl is-active archipelago-tracker
+      changed_when: false
+
+    - name: Tracker page is served
+      ansible.builtin.uri:
+        url: http://127.0.0.1:38282/
+        return_content: true
+      register: page
+      failed_when: "'Archipelago Tracker' not in page.content"
+
+    - name: Tracker follows every slot
+      ansible.builtin.uri:
+        url: http://127.0.0.1:38282/api/state
+      register: state
+      until: >-
+        state.json is defined and state.json.server_up
+        and (state.json.players | length) >= 2
+        and (state.json.players | map(attribute='total') | min) > 0
+      retries: 15
+      delay: 2
+
+    # A minimal game client: connects as Alice and checks one location.
+    - name: Write test client
+      ansible.builtin.copy:
+        dest: /tmp/check_one.py
+        mode: "0644"
+        content: |
+          import asyncio, json, sys, uuid
+          sys.path.insert(0, "/opt/archipelago/tracker")
+          import archipelago_spoilers  # same runtime as the tracker: the release's libraries
+          archipelago_spoilers.bootstrap("/opt/archipelago/current")
+          from websockets.asyncio.client import connect
+          async def main():
+              async with connect("ws://127.0.0.1:38281", max_size=None) as ws:
+                  await ws.recv()  # RoomInfo
+                  await ws.send(json.dumps([{"cmd": "Connect", "password": "molecule", "game": "APQuest",
+                      "name": "Alice", "uuid": str(uuid.uuid4()), "tags": [], "items_handling": 7,
+                      "version": {"major": 0, "minor": 6, "build": 7, "class": "Version"}, "slot_data": False}]))
+                  while True:
+                      for p in json.loads(await ws.recv()):
+                          if p["cmd"] == "Connected":
+                              await ws.send(json.dumps([{"cmd": "LocationChecks",
+                                                         "locations": p["missing_locations"][:1]}]))
+                              await asyncio.sleep(2)
+                              return
+                          if p["cmd"] == "ConnectionRefused":
+                              sys.exit(p)
+          asyncio.run(main())
+
+    - name: Check one location as Alice
+      ansible.builtin.shell: timeout 30 /opt/archipelago/python-*/bin/python3 /tmp/check_one.py
+      changed_when: false
+
+    - name: Tracker shows the new check and the send
+      ansible.builtin.uri:
+        url: http://127.0.0.1:38282/api/state
+      register: after
+      until: >-
+        (after.json.players | selectattr('name', 'equalto', 'Alice') | first).checked
+        > (state.json.players | selectattr('name', 'equalto', 'Alice') | first).checked
+        and (after.json.feed | selectattr('from', 'equalto', 'Alice') | list | length) > 0
+      retries: 15
+      delay: 2
+
+    - name: Read tracker state with spoilers
+      ansible.builtin.uri:
+        url: http://127.0.0.1:38282/api/state?spoilers
+      register: spoiled
+
+    - name: Spoilers only appear with the flag, and cover every remaining location
+      ansible.builtin.assert:
+        that:
+          - after.json.players | selectattr('remaining', 'defined') | list | length == 0
+          - item.remaining | length == item.total - item.checked
+          - item.remaining | map(attribute='item') | select('match', '^Item -?[0-9]+$') | list | length == 0
+        quiet: true
+      loop: "{{ spoiled.json.players }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Spoiler engine rebuilt the seed
+      ansible.builtin.uri:
+        url: http://127.0.0.1:38282/api/spoilers/status
+      register: engine
+      until: engine.json.status != 'loading'
+      retries: 30
+      delay: 2
+      failed_when: engine.json.status != 'ready'
+
+    - name: Spoilers page is served
+      ansible.builtin.uri:
+        url: http://127.0.0.1:38282/spoilers
+        return_content: true
+      register: spoilers_page
+      failed_when: "'Archipelago Spoilers' not in spoilers_page.content"
+
+    - name: Search finds locations
+      ansible.builtin.uri:
+        url: http://127.0.0.1:38282/api/spoilers/search?q=e
+      register: found
+      failed_when: found.json.results | length == 0
+
+    - name: Path to an unfound progression item
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:38282/api/spoilers/path?slot={{ target.slot }}&location={{ target.location_id }}"
+      vars:
+        target: "{{ found.json.results | rejectattr('checked') | selectattr('flags', 'odd') | first }}"
+      register: route
+      failed_when: >-
+        not route.json.reachable
+        or route.json.target.location_id != target.location_id
+        or route.json.rounds | flatten | selectattr('checked') | list | length > 0
+
+    # Let the Discord forwarder flush this send before the next verify run
+    # counts webhook posts.
+    - name: Wait for notifier batch
+      ansible.builtin.pause:
+        seconds: 4

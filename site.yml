@@ -222,6 +222,74 @@
         - archipelago_discord_webhook_url | length > 0
         - welcome is changed or archipelago_discord_welcome | bool
 
+    - name: Install web tracker
+      when: archipelago_tracker_listen_host | length > 0
+      block:
+        - name: Download standalone Python for the tracker
+          ansible.builtin.get_url:
+            url: "https://github.com/astral-sh/python-build-standalone/releases/download/{{ archipelago_tracker_python_release }}/cpython-{{ archipelago_tracker_python_version }}%2B{{ archipelago_tracker_python_release }}-x86_64-unknown-linux-gnu-install_only.tar.gz"
+            dest: "{{ archipelago_root }}/python-{{ archipelago_tracker_python_version }}.tar.gz"
+            checksum: "sha256:{{ archipelago_tracker_python_sha256 }}"
+            mode: "0644"
+
+        - name: Create Python directory
+          ansible.builtin.file:
+            path: "{{ archipelago_root }}/python-{{ archipelago_tracker_python_version }}"
+            state: directory
+            mode: "0755"
+
+        - name: Extract standalone Python
+          ansible.builtin.unarchive:
+            src: "{{ archipelago_root }}/python-{{ archipelago_tracker_python_version }}.tar.gz"
+            dest: "{{ archipelago_root }}/python-{{ archipelago_tracker_python_version }}"
+            remote_src: true
+            extra_opts: [--strip-components=1]
+            creates: "{{ archipelago_root }}/python-{{ archipelago_tracker_python_version }}/bin/python3"
+
+        - name: Create tracker directory
+          ansible.builtin.file:
+            path: "{{ archipelago_root }}/tracker"
+            state: directory
+            mode: "0755"
+
+        - name: Install tracker files
+          ansible.builtin.copy:
+            src: "{{ item }}"
+            dest: "{{ archipelago_root }}/tracker/{{ item }}"
+            mode: "0644"
+          loop: [archipelago-tracker.py, archipelago_spoilers.py, tracker.html, spoilers.html]
+          notify: Restart archipelago-tracker
+
+        - name: Write tracker config
+          ansible.builtin.copy:
+            content: "{{ tracker_config | to_nice_json }}\n"
+            dest: /etc/archipelago-tracker.json
+            mode: "0600"
+          vars:
+            tracker_config:
+              server: "ws://127.0.0.1:{{ archipelago_port }}"
+              password: "{{ archipelago_password }}"
+              slots: "{{ spoiler.stdout | regex_findall('Player \\d+: ([^\\r\\n]+)\\r?\\nGame:') }}"
+              listen_host: "{{ archipelago_tracker_listen_host }}"
+              listen_port: "{{ archipelago_tracker_listen_port | int }}"
+              seed_zip: "{{ archipelago_seed_path }}"
+              players_dir: "{{ archipelago_root }}/players"
+          notify: Restart archipelago-tracker
+
+        - name: Install tracker systemd unit
+          ansible.builtin.template:
+            src: archipelago-tracker.service.j2
+            dest: /etc/systemd/system/archipelago-tracker.service
+            mode: "0644"
+          notify: Restart archipelago-tracker
+
+        - name: Enable and start tracker
+          ansible.builtin.systemd_service:
+            name: archipelago-tracker
+            enabled: true
+            state: started
+            daemon_reload: true
+
     - name: Show connection details
       ansible.builtin.debug:
         msg: "Hosting {{ archipelago_seed_path | basename }} at {{ inventory_hostname }}:{{ archipelago_port }}"
@@ -236,5 +304,11 @@
     - name: Restart archipelago-discord
       ansible.builtin.systemd_service:
         name: archipelago-discord
+        state: restarted
+        daemon_reload: true
+
+    - name: Restart archipelago-tracker
+      ansible.builtin.systemd_service:
+        name: archipelago-tracker
         state: restarted
         daemon_reload: true

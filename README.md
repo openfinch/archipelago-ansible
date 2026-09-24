@@ -66,6 +66,35 @@ user -> Copy User ID. Players not listed are named in bold without a ping.
 It runs as `archipelago-discord.service`, reading the server's journal.
 Messages are batched every 3 seconds to stay under Discord's rate limit.
 
+## Web tracker
+
+Optional. A read-only page showing each player's progress, received items and
+hints, plus a live feed of item sends. It connects to the server as a
+"Tracker" client for every slot, keeps state in memory, and serves the page
+and `/api/state` from `archipelago-tracker.service`.
+
+Enable it by setting the address it should listen on in `host_vars/<host>.yml`,
+normally one only a reverse proxy can reach:
+
+```yaml
+archipelago_tracker_listen_host: 172.18.0.1   # e.g. a Docker bridge IP
+archipelago_tracker_listen_port: 38282        # default
+```
+
+Players are read from the hosted seed. Online status and the send feed start
+empty when the tracker restarts; progress, items and hints come from the
+server.
+
+`/spoilers` (not linked from the main page) lists every player's remaining
+locations and their items, and searches items and locations. Picking a result
+shows the still-unchecked checks needed to reach it, grouped into rounds where
+each round unlocks the next. To work this out the tracker rebuilds the hosted
+seed with Archipelago's own logic from `players/` and the seed number, and
+refuses if the result differs from the hosted seed (for example after player
+files change without regenerating). It runs on a standalone Python matching
+the release (`archipelago_tracker_python_*` in `group_vars/all.yml`), using
+the libraries bundled with the release.
+
 ## Layout on the server
 
 | Path | Contents |
@@ -98,6 +127,8 @@ The `default` scenario checks, in order:
 3. The service is active, port 38281 answers, and the unit has the password.
    The Discord notifier is running and turns sample server log lines into
    one batched webhook message that pings only mapped players.
+   The tracker serves its page, follows every slot, and shows a check sent
+   by a test client in both the player's progress and the send feed.
 4. Removing a player and running with `archipelago_regenerate=true` deletes
    that player's file on the server and hosts a new seed.
 5. A seed passed with `archipelago_seed_file` is uploaded and hosted.

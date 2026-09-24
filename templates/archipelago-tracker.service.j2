@@ -1,0 +1,24 @@
+[Unit]
+Description=Archipelago web tracker
+After=archipelago.service network-online.target
+Wants=network-online.target
+
+[Service]
+User=archipelago
+Group=archipelago
+LoadCredential=config:/etc/archipelago-tracker.json
+# The spoiler graph imports the release's bundled libraries.
+Environment=ARCHIPELAGO_DIR={{ archipelago_root }}/current
+ExecStart={{ archipelago_root }}/python-{{ archipelago_tracker_python_version }}/bin/python3 {{ archipelago_root }}/tracker/archipelago-tracker.py
+# Retries until the game server and the listen address are available.
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+# Rebuilding the seed writes Archipelago's host.yaml and logs.
+ReadWritePaths={{ archipelago_root }}
+
+[Install]
+WantedBy=multi-user.target

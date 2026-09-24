@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Archipelago Spoilers</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2329; --muted: #66707a; --line: #e2e5e9;
+          --accent: #316b84; --good: #2e8b57; --prog: #7b4bb3; --useful: #2f6fb3; --trap: #b3452f;
+          --target: #fff4dc; --target-line: #d9a93f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14181c; --card: #1c2228; --text: #e4e8ec; --muted: #98a2ac; --line: #2c343c;
+            --accent: #5aa3c2; --good: #4fbf82; --prog: #b08be0; --useful: #6fa8e6; --trap: #e07a62;
+            --target: #2e2718; --target-line: #b88d33; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  a { color: var(--accent); }
+  .status { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
+  input[type=search] { width: 100%; padding: 10px 12px; font: inherit; color: var(--text); background: var(--bg);
+                       border: 1px solid var(--line); border-radius: 6px; }
+  input[type=search]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .results { list-style: none; margin: 8px 0 0; padding: 0; max-height: 320px; overflow-y: auto; }
+  .results li { border-bottom: 1px solid var(--line); }
+  .results button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 6px 4px; cursor: pointer; }
+  .results button:hover, .results button:focus-visible { background: var(--bg); }
+  .where { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .p1 { color: var(--prog); font-weight: 600; }
+  .p2 { color: var(--useful); }
+  .p4 { color: var(--trap); }
+  .done { color: var(--muted); text-decoration: line-through; }
+  .summary { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+  .graph { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
+  .column { flex: 0 0 240px; }
+  .column h3 { font-size: 13px; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+  .arrow { flex: 0 0 auto; align-self: center; color: var(--muted); font-size: 20px; }
+  .node { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
+  .node .loc { font-weight: 600; overflow-wrap: anywhere; }
+  .node.target { background: var(--target); border-color: var(--target-line); }
+  @media (max-width: 700px) {
+    .graph { flex-direction: column; overflow-x: visible; }
+    .column { flex: 1 1 auto; width: 100%; }
+    .arrow { transform: rotate(90deg); align-self: center; }
+  }
+  details { margin-top: 6px; font-size: 14px; }
+  summary { cursor: pointer; color: var(--accent); }
+  details ul { margin: 6px 0 0; padding-left: 18px; }
+  details li { margin: 2px 0; overflow-wrap: anywhere; }
+  .empty { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Archipelago Spoilers</h1>
+    <span class="status" id="status">Loading...</span>
+    <a href="./">Back to tracker</a>
+  </header>
+
+  <section class="card">
+    <h2>Find an item or location</h2>
+    <input type="search" id="q" placeholder="e.g. Radiation Suit, Storm Ruler, Lumbridge" autocomplete="off">
+    <ul class="results" id="results"></ul>
+  </section>
+
+  <section class="card" id="graph-card" hidden>
+    <h2 id="graph-title"></h2>
+    <p class="summary" id="graph-summary"></p>
+    <div class="graph" id="graph"></div>
+  </section>
+
+  <section class="card">
+    <h2>Remaining checks by player</h2>
+    <div id="remaining"><p class="empty">Loading...</p></div>
+  </section>
+</main>
+<script>
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+// Item flags: 1 progression, 2 useful, 4 trap.
+const flagClass = f => (f & 1) ? "p1" : (f & 4) ? "p4" : (f & 2) ? "p2" : "";
+const getJSON = async url => (await fetch(url, { cache: "no-store" })).json();
+const setStatus = t => document.getElementById("status").textContent = t;
+
+function engineStatus(r) {
+  if (r.status === "loading") { setStatus("Rebuilding the seed's logic, try again in a few seconds"); return false; }
+  if (r.status === "error") { setStatus("Graph unavailable: " + r.error); return false; }
+  setStatus("Ready");
+  return true;
+}
+
+// Search as you type.
+let searchTimer;
+document.getElementById("q").addEventListener("input", e => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => search(e.target.value), 250);
+});
+
+async function search(q) {
+  const list = document.getElementById("results");
+  if (!q.trim()) { list.replaceChildren(); return; }
+  const r = await getJSON("api/spoilers/search?q=" + encodeURIComponent(q));
+  if (!engineStatus(r)) return;
+  list.replaceChildren(...r.results.map(hit => {
+    const b = el("button");
+    const what = el("div");
+    what.append(el("span", flagClass(hit.flags) + (hit.checked ? " done" : ""), hit.item), ` for ${hit.owner}`);
+    b.append(what, el("div", "where", `${hit.location} in ${hit.world}'s world${hit.checked ? " (found)" : ""}`));
+    b.addEventListener("click", () => showPath(hit.slot, hit.location_id));
+    const li = el("li");
+    li.append(b);
+    return li;
+  }));
+  if (!r.results.length) list.append(el("li", "empty", "No matches."));
+}
+
+function node(n, cls) {
+  const d = el("div", "node" + (cls ? " " + cls : ""));
+  d.append(el("div", "where", n.world), el("div", "loc", n.location));
+  const gives = el("div");
+  gives.append("gives ", el("span", flagClass(n.flags), n.item), ` to ${n.owner}`);
+  d.append(gives);
+  return d;
+}
+
+async function showPath(slot, location) {
+  history.replaceState(null, "", `?slot=${slot}&location=${location}`);
+  const card = document.getElementById("graph-card");
+  const graph = document.getElementById("graph");
+  card.hidden = false;
+  document.getElementById("graph-title").textContent = "Working it out...";
+  document.getElementById("graph-summary").textContent = "";
+  graph.replaceChildren();
+  const r = await getJSON(`api/spoilers/path?slot=${slot}&location=${location}`);
+  if (!engineStatus(r)) { card.hidden = true; return; }
+  if (r.error) { document.getElementById("graph-title").textContent = r.error; return; }
+  const t = r.target;
+  document.getElementById("graph-title").textContent = `${t.item} for ${t.owner}`;
+  const summary = document.getElementById("graph-summary");
+  if (t.checked) { summary.textContent = "Already found."; graph.append(node(t, "target")); return; }
+  if (!r.reachable) { summary.textContent = "Not reachable in logic from the current state."; return; }
+  const checks = r.rounds.flat();
+  const worlds = [...new Set(checks.map(n => n.world))];
+  summary.textContent = checks.length
+    ? `${checks.length} check${checks.length === 1 ? "" : "s"} still needed first, over ${r.rounds.length} round${r.rounds.length === 1 ? "" : "s"}, in ${worlds.join(", ")}'s world${worlds.length === 1 ? "" : "s"}. Each round unlocks the next.`
+    : "Nothing else is needed: it can be found now.";
+  r.rounds.forEach((round, i) => {
+    const col = el("div", "column");
+    col.append(el("h3", "", `Round ${i + 1}`), ...round.map(n => node(n)));
+    graph.append(col, el("div", "arrow", "→"));
+  });
+  const last = el("div", "column");
+  last.append(el("h3", "", "Target"), node(t, "target"));
+  graph.append(last);
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function loadRemaining() {
+  const s = await getJSON("api/state?spoilers");
+  const box = document.getElementById("remaining");
+  box.replaceChildren(...s.players.map(p => {
+    const d = el("details");
+    d.append(el("summary", "", `${p.name} (${p.game}): ${p.remaining.length} remaining`));
+    const ul = el("ul");
+    for (const r of p.remaining) {
+      const li = el("li");
+      li.append(`${r.location}: `, el("span", flagClass(r.flags), r.item), ` for ${r.for}`);
+      ul.append(li);
+    }
+    d.append(ul);
+    return d;
+  }));
+  if (!s.players.length) box.append(el("p", "empty", "No players connected to the tracker yet."));
+}
+
+(async () => {
+  const r = await getJSON("api/spoilers/status");
+  engineStatus(r);
+  loadRemaining();
+  const params = new URLSearchParams(location.search);
+  if (params.has("slot") && params.has("location")) showPath(params.get("slot"), params.get("location"));
+})();
+</script>
+</body>
+</html>

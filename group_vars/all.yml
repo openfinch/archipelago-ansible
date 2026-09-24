@@ -35,3 +35,14 @@ archipelago_discord_mentions: {}
 archipelago_public_address: "{{ ansible_default_ipv4.address }}"
 # Set to true (-e archipelago_discord_welcome=true) to repost the welcome.
 archipelago_discord_welcome: false
+
+# Web tracker. Empty listen host disables it. Set in host_vars, e.g. the
+# Docker bridge IP a reverse proxy can reach.
+archipelago_tracker_listen_host: ""
+archipelago_tracker_listen_port: 38282
+# The tracker's spoiler graph runs Archipelago's bundled libraries, which need
+# the release's Python version (3.12 for 0.6.x). Standalone build from
+# https://github.com/astral-sh/python-build-standalone/releases
+archipelago_tracker_python_version: "3.12.14"
+archipelago_tracker_python_release: "20260901"
+archipelago_tracker_python_sha256: "936c246dfdbbfa7cb22dd01814a21f582a892689fae96b06071a5e433baffa22"
