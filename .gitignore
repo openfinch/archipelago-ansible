@@ -2,3 +2,4 @@ inventory.ini
 *.retry
 host_vars/
 demo/
+custom_worlds/*.apworld

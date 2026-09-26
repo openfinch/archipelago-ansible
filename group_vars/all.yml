@@ -40,6 +40,9 @@ archipelago_discord_welcome: false
 # Docker bridge IP a reverse proxy can reach.
 archipelago_tracker_listen_host: ""
 archipelago_tracker_listen_port: 38282
+# The /spoilers page: item search and the checks needed to reach an item,
+# plus every player's remaining locations. Off hides it and skips the work.
+archipelago_tracker_spoilers: false
 # The tracker's spoiler graph runs Archipelago's bundled libraries, which need
 # the release's Python version (3.12 for 0.6.x). Standalone build from
 # https://github.com/astral-sh/python-build-standalone/releases

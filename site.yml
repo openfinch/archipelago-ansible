@@ -272,6 +272,7 @@
               slots: "{{ spoiler.stdout | regex_findall('Player \\d+: ([^\\r\\n]+)\\r?\\nGame:') }}"
               listen_host: "{{ archipelago_tracker_listen_host }}"
               listen_port: "{{ archipelago_tracker_listen_port | int }}"
+              spoilers: "{{ archipelago_tracker_spoilers | bool }}"
               seed_zip: "{{ archipelago_seed_path }}"
               players_dir: "{{ archipelago_root }}/players"
           notify: Restart archipelago-tracker

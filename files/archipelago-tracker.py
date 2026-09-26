@@ -3,15 +3,16 @@
 
 Connects to the server as a "Tracker" client for every slot, keeps progress,
 received items, hints and recent item sends in memory, and serves them as
-JSON (/api/state) plus a single page (/). /api/state?spoilers also lists
-each player's remaining locations and the items in them; /spoilers is a page
-for those plus item search and the checks needed to reach an item.
+JSON (/api/state) plus a single page (/). With "spoilers": true in the
+config, /api/state?spoilers also lists each player's remaining locations and
+the items in them, and /spoilers is a page for those plus item search and the
+checks needed to reach an item.
 
 Runs on the Archipelago release's own Python version and libraries, found via
 $ARCHIPELAGO_DIR. Config is a JSON file in $CREDENTIALS_DIRECTORY/config:
 {"server": "ws://127.0.0.1:38281", "password": "...", "slots": ["name", ...],
  "listen_host": "127.0.0.1", "listen_port": 38282,
- "seed_zip": "/path/AP_x.zip", "players_dir": "/path/players"}
+ "spoilers": false, "seed_zip": "/path/AP_x.zip", "players_dir": "/path/players"}
 """
 import asyncio
 import collections
@@ -32,7 +33,7 @@ FEED_LENGTH = 100
 POLL_SECONDS = 30
 CLIENT_GOAL = 30
 HERE = os.path.dirname(os.path.abspath(__file__))
-PAGES = {"/": "tracker.html", "/spoilers": "spoilers.html"}
+PAGES = {"/": "tracker.html"}
 
 
 class Tracker:
@@ -47,6 +48,7 @@ class Tracker:
         self.server_up = False
         self.seed = None
         self.names_ready = asyncio.Event()
+        self.spoilers_enabled = config.get("spoilers", False)
         self.spoilers = archipelago_spoilers.Spoilers(config["seed_zip"], config["players_dir"])
         # One thread: engine work is CPU-bound and shares one rebuilt world.
         self.engine = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -128,9 +130,10 @@ class Tracker:
                 "total": len(checked) + len(packet["missing_locations"]),
                 "received": [], "hints": [], "goal": False, "scouted": {},
             }
-            # create_as_hint 0: look up contents without creating or announcing hints.
-            await ws.send(json.dumps([{"cmd": "LocationScouts",
-                                       "locations": packet["missing_locations"], "create_as_hint": 0}]))
+            if self.spoilers_enabled:
+                # create_as_hint 0: look up contents without creating or announcing hints.
+                await ws.send(json.dumps([{"cmd": "LocationScouts",
+                                           "locations": packet["missing_locations"], "create_as_hint": 0}]))
         elif cmd == "RoomUpdate" and name in self.players:
             self.players[name]["checked"].update(packet.get("checked_locations", []))
         elif cmd == "ReceivedItems" and name in self.players:
@@ -252,16 +255,16 @@ class Tracker:
             path, _, query = (request[1] if len(request) > 1 else "/").partition("?")
             params = urllib.parse.parse_qs(query, keep_blank_values=True)
             if path == "/api/state":
-                body = json.dumps(self.state("spoilers" in params)).encode()
+                body = json.dumps(self.state(self.spoilers_enabled and "spoilers" in params)).encode()
                 kind, status = "application/json", "200 OK"
-            elif path.startswith("/api/spoilers/"):
+            elif path.startswith("/api/spoilers/") and self.spoilers_enabled:
                 try:
                     body = json.dumps(await self.spoiler_api(path, params)).encode()
                     kind, status = "application/json", "200 OK"
                 except (KeyError, ValueError):
                     body, kind, status = b"Bad request", "text/plain", "400 Bad Request"
-            elif path in PAGES:
-                with open(os.path.join(HERE, PAGES[path]), "rb") as f:
+            elif path in PAGES or (path == "/spoilers" and self.spoilers_enabled):
+                with open(os.path.join(HERE, PAGES.get(path, "spoilers.html")), "rb") as f:
                     body, kind, status = f.read(), "text/html; charset=utf-8", "200 OK"
             else:
                 body, kind, status = b"Not found", "text/plain", "404 Not Found"
@@ -277,7 +280,8 @@ async def main():
     with open(os.path.join(os.environ["CREDENTIALS_DIRECTORY"], "config")) as f:
         config = json.load(f)
     tracker = Tracker(config)
-    asyncio.get_running_loop().run_in_executor(tracker.engine, tracker.spoilers.load)
+    if tracker.spoilers_enabled:
+        asyncio.get_running_loop().run_in_executor(tracker.engine, tracker.spoilers.load)
     server = await asyncio.start_server(tracker.serve_http, config["listen_host"], config["listen_port"])
     tasks = [tracker.watch_slot(name, i == 0) for i, name in enumerate(config["slots"])]
     async with server:

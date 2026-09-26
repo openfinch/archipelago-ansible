@@ -85,7 +85,8 @@ Players are read from the hosted seed. Online status and the send feed start
 empty when the tracker restarts; progress, items and hints come from the
 server.
 
-`/spoilers` (not linked from the main page) lists every player's remaining
+With `archipelago_tracker_spoilers: true` (off by default), `/spoilers`
+(not linked from the main page) lists every player's remaining
 locations and their items, and searches items and locations. Picking a result
 shows the still-unchecked checks needed to reach it, grouped into rounds where
 each round unlocks the next. To work this out the tracker rebuilds the hosted
